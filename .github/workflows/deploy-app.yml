@@ -40,14 +40,14 @@ jobs:
         run: dotnet restore
 
       - name: Build Static Generator
-        run: dotnet build./tools/PortfolioStaticGenerator --configuration Release --no-restore
+        run: dotnet build ./tools/PortfolioStaticGenerator --configuration Release --no-restore
 
       - name: Build and Publish Blazor App
-        run: dotnet publish./src/Homepage --configuration Release -o./dist --no-restore
+        run: dotnet publish ./src/Homepage --configuration Release -o /dist --no-restore
 
       - name: Run Static Generator
         run: |
-          dotnet run --project./tools/PortfolioStaticGenerator --configuration Release \
+          dotnet run --project ./tools/PortfolioStaticGenerator --configuration Release \
             -- ContentRepoPath="${{ github.workspace }}/portfolio-content/" \
               OutputDirectory="${{ github.workspace }}/dist/" \
               BaseUrl="https://ulfbou.github.io/portfolio/" \
@@ -59,7 +59,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path:./dist
+          path: ./dist
 
       - name: Deploy to GitHub Pages
         id: deployment
