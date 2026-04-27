@@ -1,0 +1,8 @@
+{
+  "id": "portfolio",
+  "title": "Ulf Bourelius Portfolio",
+  "entry": "/portfolio/",
+  "version": "2026.04.27",
+  "capabilities": ["user"],
+  "description": "Local-first portfolio migrated from legacy static generator"
+}

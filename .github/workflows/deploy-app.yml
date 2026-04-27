@@ -1,0 +1,75 @@
+name: Deploy Portfolio App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-portfolio
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout portfolio app
+        uses: actions/checkout@v4
+
+      - name: Checkout Portfolio-Content
+        uses: actions/checkout@v4
+        with:
+          repository: ulfbou/Portfolio-Content
+          path: portfolio-content
+
+      - name: Setup.NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Static Generator
+        run: dotnet build./tools/PortfolioStaticGenerator --configuration Release --no-restore
+
+      - name: Build and Publish Blazor App
+        run: dotnet publish./src/Homepage --configuration Release -o./dist --no-restore
+
+      - name: Run Static Generator
+        run: |
+          dotnet run --project./tools/PortfolioStaticGenerator --configuration Release \
+            -- ContentRepoPath="${{ github.workspace }}/portfolio-content/" \
+              OutputDirectory="${{ github.workspace }}/dist/" \
+              BaseUrl="https://ulfbou.github.io/portfolio/" \
+              BlazorPublishOutput="${{ github.workspace }}/dist/wwwroot"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path:./dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Register with SAOS kernel
+        if: success()
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.SAOS_KERNEL_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/ulfbou/ulfbou.github.io/dispatches \
+            -d '{"event_type":"saos-app-register","client_payload":'"$(cat app-info.json)"'}'
