@@ -420,3 +420,4 @@ FodyWeavers.xsd
 # JS SDK build output
 sdk/js/**/dist/
 sdk/js/**/package-lock.json
+.dx/*
