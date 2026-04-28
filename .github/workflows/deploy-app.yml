@@ -2,7 +2,7 @@ name: Deploy Portfolio App
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -31,27 +31,58 @@ jobs:
           repository: ulfbou/Portfolio-Content
           path: portfolio-content
 
-      - name: Setup.NET SDK
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore
+        run: |
+          dotnet restore ./src/Homepage.Common/Homepage.Common.csproj
+          dotnet restore ./src/Homepage/Homepage.csproj
+          dotnet restore ./tools/PortfolioStaticGenerator/PortfolioStaticGenerator.csproj
 
       - name: Build Static Generator
-        run: dotnet build ./tools/PortfolioStaticGenerator --configuration Release --no-restore
+        run: dotnet build ./tools/PortfolioStaticGenerator/PortfolioStaticGenerator.csproj --configuration Release --no-restore
 
       - name: Build and Publish Blazor App
-        run: dotnet publish ./src/Homepage --configuration Release -o /dist --no-restore
+        run: dotnet publish ./src/Homepage/Homepage.csproj --configuration Release -o ./publish --no-restore
+
+      - name: Debug – after publish
+        run: |
+          echo "::group::publish/wwwroot tree"
+          find ./publish/wwwroot -type f -printf "%P\n" | sort
+          echo "::endgroup::"
 
       - name: Run Static Generator
         run: |
-          dotnet run --project ./tools/PortfolioStaticGenerator --configuration Release \
-            -- ContentRepoPath="${{ github.workspace }}/portfolio-content/" \
-              OutputDirectory="${{ github.workspace }}/dist/" \
-              BaseUrl="https://ulfbou.github.io/portfolio/" \
-              BlazorPublishOutput="${{ github.workspace }}/dist/wwwroot"
+          dotnet run --project ./tools/PortfolioStaticGenerator/PortfolioStaticGenerator.csproj --configuration Release --no-restore -- \
+            ContentRepoPath="${{ github.workspace }}/portfolio-content/" \
+            OutputDirectory="${{ github.workspace }}/dist/wwwroot/" \
+            BaseUrl="https://ulfbou.github.io/portfolio/" \
+            BlazorPublishOutput="${{ github.workspace }}/publish/wwwroot"
+
+      - name: Debug – after generator
+        run: |
+          echo "::group::dist/wwwroot tree (root)"
+          find ./dist/wwwroot -maxdepth 2 -type f -printf "%P\n" | sort
+          echo "::endgroup::"
+          echo "::group::dist/wwwroot/app tree"
+          find ./dist/wwwroot/app -type f -printf "%P\n" | sort
+          echo "::endgroup::"
+
+      - name: Merge Blazor assets to site root
+        run: |
+          cp -r ./publish/wwwroot/_framework ./dist/wwwroot/
+          cp -r ./publish/wwwroot/css ./dist/wwwroot/
+          cp -r ./publish/wwwroot/js ./dist/wwwroot/
+          cp ./publish/wwwroot/Homepage.styles.css ./dist/wwwroot/
+
+      - name: Debug – after merge
+        run: |
+          echo "::group::final dist/wwwroot tree"
+          find ./dist/wwwroot -type f -printf "%P\n" | sort
+          echo "::endgroup::"
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -59,7 +90,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./dist/wwwroot 
 
       - name: Deploy to GitHub Pages
         id: deployment
@@ -67,9 +98,30 @@ jobs:
 
       - name: Register with SAOS kernel
         if: success()
+        env:
+          SAOS_KERNEL_TOKEN: ${{ secrets.SAOS_KERNEL_TOKEN }}
         run: |
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.SAOS_KERNEL_TOKEN }}" \
+          set -euo pipefail
+
+          APP_INFO="${{ github.workspace }}/app-info.json"
+          if [[ ! -f "$APP_INFO" ]]; then
+            echo "::error::app-info.json not found at $APP_INFO"
+            echo "Listing files in the workspace for debugging:"
+            ls -R "${{ github.workspace }}"
+            exit 1
+          fi
+
+          # Build the repository_dispatch payload expected by link-app.yml
+          jq -n --argjson info "$(cat "$APP_INFO")" \
+            '{event_type:"saos-app-register", client_payload:$info}' > /tmp/payload.json
+
+          echo "Dispatching to ulfbou.github.io..."
+          HTTP_CODE=$(curl -s -o /tmp/resp.txt -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $SAOS_KERNEL_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/ulfbou/ulfbou.github.io/dispatches \
-            -d '{"event_type":"saos-app-register","client_payload":'"$(cat app-info.json)"'}'
+            -d @/tmp/payload.json)
+
+          echo "Dispatch HTTP $HTTP_CODE"
+          cat /tmp/resp.txt
+          test "$HTTP_CODE" = "204"
